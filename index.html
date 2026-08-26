@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#10201b" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; worker-src 'self' blob:; connect-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="stylesheet" href="./styles.css" />
+    <title>Meter Watch</title>
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="app-header">
+        <div><p class="eyebrow">PRIVATE TIMELAPSE</p><h1>Meter Watch</h1></div>
+        <span id="privacy-state" class="privacy-state">Local only</span>
+      </header>
+
+      <section class="camera-card" aria-label="Camera preview">
+        <video id="camera" playsinline autoplay muted></video>
+        <div id="camera-empty" class="camera-empty">Start a session to open the rear camera.</div>
+        <div class="camera-overlay"><span id="session-state">Ready</span><time id="next-capture">No capture scheduled</time></div>
+      </section>
+
+      <section class="control-card">
+        <div class="section-heading"><p class="eyebrow">CAPTURE SETTINGS</p><p id="storage-estimate" class="quiet">Checking local storage…</p></div>
+        <div class="settings-grid">
+          <label>Interval
+            <select id="interval-minutes">
+              <option value="1">Every 1 minute</option>
+              <option value="5">Every 5 minutes</option>
+              <option value="10" selected>Every 10 minutes</option>
+              <option value="15">Every 15 minutes</option>
+              <option value="30">Every 30 minutes</option>
+              <option value="60">Every hour</option>
+            </select>
+          </label>
+          <label>Stop automatically
+            <select id="duration-hours">
+              <option value="0">When I tap Stop</option>
+              <option value="2">After 2 hours</option>
+              <option value="4">After 4 hours</option>
+              <option value="8" selected>After 8 hours</option>
+              <option value="12">After 12 hours</option>
+            </select>
+          </label>
+          <label>Photo size
+            <select id="capture-size">
+              <option value="720" selected>Storage efficient</option>
+              <option value="960">Balanced</option>
+              <option value="1280">More detail</option>
+            </select>
+          </label>
+        </div>
+        <p class="screen-note">Keep this app open, the phone unlocked, and connected to power while capturing.</p>
+        <div class="primary-actions">
+          <button id="start-session" class="button button-primary">Start session</button>
+          <button id="stop-session" class="button button-danger" disabled>Stop session</button>
+          <button id="capture-now" class="button button-secondary" disabled>Capture now</button>
+        </div>
+      </section>
+
+      <section class="readings-card">
+        <div class="section-heading"><div><p class="eyebrow">READINGS</p><h2 id="reading-count">No photos yet</h2></div><button id="export-zip" class="text-button" disabled>Export ZIP</button></div>
+        <p class="quiet">Meter reading detection runs on this iPhone. Review and correct every result before relying on it.</p>
+        <div id="reading-list" class="reading-list"></div>
+      </section>
+
+      <section class="data-actions">
+        <button id="delete-all" class="text-button text-danger" disabled>Delete all local photos and readings</button>
+      </section>
+    </main>
+    <template id="reading-template">
+      <article class="reading-item">
+        <button class="thumbnail-button" type="button"><img alt="Captured meter" /></button>
+        <div class="reading-main"><time></time><label>Meter reading<input class="reading-value" inputmode="decimal" autocomplete="off" placeholder="Review reading" /></label><p class="ocr-status"></p></div>
+        <button class="delete-reading" type="button" aria-label="Delete photo">Delete</button>
+      </article>
+    </template>
+    <dialog id="photo-dialog"><button id="close-photo" class="dialog-close" aria-label="Close photo">×</button><img id="full-photo" alt="Captured meter" /></dialog>
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>

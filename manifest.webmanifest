@@ -1,0 +1,13 @@
+{
+  "name": "Meter Watch",
+  "short_name": "Meter Watch",
+  "description": "Private interval photos and locally reviewed meter readings.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#10201b",
+  "theme_color": "#10201b",
+  "icons": [
+    { "src": "./icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
