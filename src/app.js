@@ -76,7 +76,7 @@ async function imageBlob() {
 async function capturePhoto() {
   if (!stream) return;
   const blob = await imageBlob();
-  const capture = { syncId: crypto.randomUUID(), createdAt: Date.now(), blob, reading: "", ocr: "Reading queued for local review", ocrConfidence: 0, syncStatus: githubSync ? "Waiting to upload" : "Stored on this device" };
+  const capture = { syncId: crypto.randomUUID(), createdAt: Date.now(), blob, reading: "", ocr: "Reading queued for local review", ocrConfidence: 0, wasOnlineAtCapture: navigator.onLine, syncStatus: githubSync ? "Waiting to upload" : "Stored on this device" };
   capture.id = await addCapture(capture);
   captures.unshift(capture);
   renderCaptures();
@@ -117,7 +117,10 @@ async function readMeter(capture) {
 function queueSync(capture) {
   if (!githubSync) return;
   syncQueue = syncQueue.then(async () => {
+    const startedAt = Date.now();
     capture.syncStatus = "Uploading private copy";
+    capture.uploadStartedAt = startedAt;
+    capture.wasOnlineAtUpload = navigator.onLine;
     renderCaptures();
     await githubSync.uploadCapture(capture);
     capture.remoteSynced = true;
@@ -140,7 +143,8 @@ function renderCaptures() {
     const image = item.querySelector("img"); const url = URL.createObjectURL(capture.blob);
     image.src = url; image.dataset.url = url; item.querySelector("time").textContent = formatTime(capture.createdAt);
     const input = item.querySelector("input"); input.value = capture.reading; input.disabled = capture.remote; input.addEventListener("change", async () => { capture.reading = input.value.trim(); capture.ocr = "Reviewed manually"; await updateCapture(capture); renderCaptures(); queueSync(capture); });
-    item.querySelector(".ocr-status").textContent = `${capture.ocr}${capture.syncStatus ? ` · ${capture.syncStatus}` : ""}`;
+    const uploadHealth = capture.uploadedAt ? `Cloud upload: ${formatTime(capture.uploadedAt)} in ${(capture.uploadDurationMs / 1000).toFixed(1)}s${capture.wasOnlineAtUpload ? "" : " (browser reported offline)"}.` : `Browser ${capture.wasOnlineAtCapture ? "was online" : "was offline"} at capture.`;
+    item.querySelector(".ocr-status").textContent = `${capture.ocr}${capture.syncStatus ? ` · ${capture.syncStatus}` : ""} ${uploadHealth}`;
     item.querySelector(".thumbnail-button").addEventListener("click", () => { elements.fullPhoto.src = url; elements.photoDialog.showModal(); });
     const deleteButton = item.querySelector(".delete-reading"); deleteButton.disabled = capture.remote; deleteButton.textContent = capture.remote ? "Private copy" : "Remove local copy";
     deleteButton.addEventListener("click", async () => { if (!confirm("Remove this local photo and reading? Its private GitHub copy will remain.")) return; await removeCapture(capture.id); captures = captures.filter((item) => item.id !== capture.id); URL.revokeObjectURL(url); renderCaptures(); });

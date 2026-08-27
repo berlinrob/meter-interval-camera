@@ -74,6 +74,8 @@ export class GitHubSync {
     const imagePath = `captures/${capture.syncId}.jpg`;
     const metadataPath = `captures/${capture.syncId}.json`;
     if (!capture.remoteSynced) await this.putFile(imagePath, await capture.blob.arrayBuffer(), `Add meter photo ${capture.syncId}`);
+    capture.uploadedAt = Date.now();
+    capture.uploadDurationMs = capture.uploadedAt - capture.uploadStartedAt;
     const metadata = {
       version: 1,
       syncId: capture.syncId,
@@ -81,6 +83,11 @@ export class GitHubSync {
       reading: capture.reading,
       ocr: capture.ocr,
       ocrConfidence: capture.ocrConfidence,
+      wasOnlineAtCapture: capture.wasOnlineAtCapture,
+      wasOnlineAtUpload: capture.wasOnlineAtUpload,
+      uploadStartedAt: capture.uploadStartedAt,
+      uploadedAt: capture.uploadedAt,
+      uploadDurationMs: capture.uploadDurationMs,
       imagePath,
     };
     await this.putFile(metadataPath, new TextEncoder().encode(JSON.stringify(metadata, null, 2)), `Update meter reading ${capture.syncId}`);
