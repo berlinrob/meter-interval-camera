@@ -1,8 +1,9 @@
 import { createWorker } from "tesseract.js";
 import { addCapture, clearCaptures, listCaptures, removeCapture, updateCapture } from "./db.js";
+import { GitHubSync } from "./github-sync.js";
 import { createZip } from "./zip.js";
 
-const elements = Object.fromEntries(["camera", "camera-empty", "session-state", "next-capture", "interval-minutes", "duration-hours", "capture-size", "start-session", "stop-session", "capture-now", "reading-list", "reading-template", "reading-count", "storage-estimate", "export-zip", "delete-all", "photo-dialog", "full-photo", "close-photo"].map((id) => [id.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase()), document.getElementById(id)]));
+const elements = Object.fromEntries(["camera", "camera-empty", "session-state", "next-capture", "interval-minutes", "duration-hours", "capture-size", "start-session", "stop-session", "capture-now", "github-repository", "github-token", "connect-github", "sync-now", "refresh-remote", "sync-state", "privacy-state", "reading-list", "reading-template", "reading-count", "storage-estimate", "export-zip", "delete-all", "photo-dialog", "full-photo", "close-photo"].map((id) => [id.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase()), document.getElementById(id)]));
 let stream;
 let timer;
 let stopAt = 0;
@@ -10,12 +11,17 @@ let nextAt = 0;
 let active = false;
 let wakeLock;
 let captures = [];
+let remoteCaptures = [];
 let worker;
 let ocrBusy = false;
+let githubSync;
+let syncQueue = Promise.resolve();
 
 const formatTime = (value) => new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(value);
 const download = (blob, name) => { const url = URL.createObjectURL(blob); const link = Object.assign(document.createElement("a"), { href: url, download: name }); link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); };
 const setSessionControls = () => { elements.startSession.disabled = active; elements.stopSession.disabled = !active; elements.captureNow.disabled = !active; elements.intervalMinutes.disabled = active; elements.durationHours.disabled = active; elements.captureSize.disabled = active; };
+const allCaptures = () => [...captures, ...remoteCaptures].sort((a, b) => b.createdAt - a.createdAt);
+const setSyncState = (message) => { elements.syncState.textContent = message; };
 
 async function requestWakeLock() { if ("wakeLock" in navigator && active) { try { wakeLock = await navigator.wakeLock.request("screen"); } catch { /* iOS may not support wake locks; the visible warning remains. */ } } }
 async function requestPersistentStorage() {
@@ -69,10 +75,11 @@ async function imageBlob() {
 async function capturePhoto() {
   if (!stream) return;
   const blob = await imageBlob();
-  const capture = { createdAt: Date.now(), blob, reading: "", ocr: "Reading queued for local review", ocrConfidence: 0 };
+  const capture = { syncId: crypto.randomUUID(), createdAt: Date.now(), blob, reading: "", ocr: "Reading queued for local review", ocrConfidence: 0, syncStatus: githubSync ? "Waiting to upload" : "Stored on this device" };
   capture.id = await addCapture(capture);
   captures.unshift(capture);
   renderCaptures();
+  queueSync(capture);
   void readMeter(capture);
 }
 async function getWorker() {
@@ -101,36 +108,102 @@ async function readMeter(capture) {
   } finally {
     ocrBusy = false;
     await updateCapture(capture); renderCaptures();
+    queueSync(capture);
     const queued = captures.find((item) => item.ocr === "Waiting for on-device reading");
     if (queued) void readMeter(queued);
   }
 }
+function queueSync(capture) {
+  if (!githubSync) return;
+  syncQueue = syncQueue.then(async () => {
+    capture.syncStatus = "Uploading private copy";
+    renderCaptures();
+    await githubSync.uploadCapture(capture);
+    capture.remoteSynced = true;
+    capture.syncStatus = "Private copy in GitHub";
+    await updateCapture(capture);
+    renderCaptures();
+  }).catch((error) => {
+    capture.syncStatus = `Upload paused: ${error.message}`;
+    renderCaptures();
+    setSyncState("Upload needs attention");
+  });
+}
 function renderCaptures() {
   elements.readingList.replaceChildren();
-  elements.readingCount.textContent = captures.length ? `${captures.length} photo${captures.length === 1 ? "" : "s"} stored locally` : "No photos yet";
-  elements.exportZip.disabled = !captures.length; elements.deleteAll.disabled = !captures.length;
-  for (const capture of captures) {
+  const visibleCaptures = allCaptures();
+  elements.readingCount.textContent = visibleCaptures.length ? `${visibleCaptures.length} photo${visibleCaptures.length === 1 ? "" : "s"} available` : "No photos yet";
+  elements.exportZip.disabled = !visibleCaptures.length; elements.deleteAll.disabled = !captures.length;
+  for (const capture of visibleCaptures) {
     const item = elements.readingTemplate.content.firstElementChild.cloneNode(true);
     const image = item.querySelector("img"); const url = URL.createObjectURL(capture.blob);
     image.src = url; image.dataset.url = url; item.querySelector("time").textContent = formatTime(capture.createdAt);
-    const input = item.querySelector("input"); input.value = capture.reading; input.addEventListener("change", async () => { capture.reading = input.value.trim(); capture.ocr = "Reviewed manually"; await updateCapture(capture); renderCaptures(); });
-    item.querySelector(".ocr-status").textContent = capture.ocr;
+    const input = item.querySelector("input"); input.value = capture.reading; input.disabled = capture.remote; input.addEventListener("change", async () => { capture.reading = input.value.trim(); capture.ocr = "Reviewed manually"; await updateCapture(capture); renderCaptures(); queueSync(capture); });
+    item.querySelector(".ocr-status").textContent = `${capture.ocr}${capture.syncStatus ? ` · ${capture.syncStatus}` : ""}`;
     item.querySelector(".thumbnail-button").addEventListener("click", () => { elements.fullPhoto.src = url; elements.photoDialog.showModal(); });
-    item.querySelector(".delete-reading").addEventListener("click", async () => { if (!confirm("Delete this local photo and reading?")) return; await removeCapture(capture.id); captures = captures.filter((item) => item.id !== capture.id); URL.revokeObjectURL(url); renderCaptures(); });
+    const deleteButton = item.querySelector(".delete-reading"); deleteButton.disabled = capture.remote; deleteButton.textContent = capture.remote ? "Private copy" : "Remove local copy";
+    deleteButton.addEventListener("click", async () => { if (!confirm("Remove this local photo and reading? Its private GitHub copy will remain.")) return; await removeCapture(capture.id); captures = captures.filter((item) => item.id !== capture.id); URL.revokeObjectURL(url); renderCaptures(); });
     elements.readingList.append(item);
   }
   updateStorageEstimate();
 }
 async function updateStorageEstimate() { if (!navigator.storage?.estimate) { elements.storageEstimate.textContent = "Photos stay on this iPhone. Export important sessions."; return; } const { usage = 0, quota = 0 } = await navigator.storage.estimate(); elements.storageEstimate.textContent = quota ? `${Math.round(usage / 1_048_576)} MB of ${Math.round(quota / 1_048_576)} MB local storage used. Export important sessions.` : "Photos stay on this iPhone. Export important sessions."; }
 async function exportZip() {
-  const rows = ["timestamp,meter_reading,ocr_confidence", ...captures.slice().reverse().map((item) => `${new Date(item.createdAt).toISOString()},${JSON.stringify(item.reading)},${item.ocrConfidence || ""}`)];
-  const entries = [{ name: "meter-readings.csv", bytes: new TextEncoder().encode(rows.join("\n")) }, ...captures.map((item) => ({ name: `photos/meter-${new Date(item.createdAt).toISOString().replace(/[:.]/g, "-")}.jpg`, blob: item.blob }))];
+  const visibleCaptures = allCaptures();
+  const rows = ["timestamp,meter_reading,ocr_confidence", ...visibleCaptures.slice().reverse().map((item) => `${new Date(item.createdAt).toISOString()},${JSON.stringify(item.reading)},${item.ocrConfidence || ""}`)];
+  const entries = [{ name: "meter-readings.csv", bytes: new TextEncoder().encode(rows.join("\n")) }, ...visibleCaptures.map((item) => ({ name: `photos/meter-${new Date(item.createdAt).toISOString().replace(/[:.]/g, "-")}.jpg`, blob: item.blob }))];
   elements.exportZip.disabled = true; elements.exportZip.textContent = "Preparing ZIP…";
-  try { download(await createZip(entries), `meter-watch-${new Date().toISOString().slice(0, 10)}.zip`); } finally { elements.exportZip.textContent = "Export ZIP"; elements.exportZip.disabled = !captures.length; }
+  try { download(await createZip(entries), `meter-watch-${new Date().toISOString().slice(0, 10)}.zip`); } finally { elements.exportZip.textContent = "Export ZIP"; elements.exportZip.disabled = !visibleCaptures.length; }
+}
+async function connectGitHub() {
+  const token = elements.githubToken.value.trim();
+  if (!token) { setSyncState("Paste a fine-grained token first"); return; }
+  elements.connectGithub.disabled = true;
+  setSyncState("Checking private repository…");
+  try {
+    const candidate = new GitHubSync(elements.githubRepository.value, token);
+    await candidate.verify();
+    githubSync = candidate;
+    elements.githubToken.value = "";
+    elements.connectGithub.textContent = "Private sync connected";
+    elements.syncNow.disabled = false;
+    elements.refreshRemote.disabled = false;
+    elements.privacyState.textContent = "Private sync ready";
+    setSyncState("Connected. Token stays only in this tab.");
+    for (const capture of captures) queueSync(capture);
+  } catch (error) {
+    setSyncState(`Could not connect: ${error.message}`);
+  } finally {
+    elements.connectGithub.disabled = false;
+  }
+}
+async function refreshRemote() {
+  if (!githubSync) return;
+  elements.refreshRemote.disabled = true;
+  setSyncState("Loading private photos…");
+  try {
+    const loaded = await githubSync.listCaptures();
+    const localIds = new Set(captures.map((capture) => capture.syncId));
+    remoteCaptures = loaded.filter((capture) => !localIds.has(capture.syncId));
+    setSyncState(`${loaded.length} private photo${loaded.length === 1 ? "" : "s"} loaded`);
+    renderCaptures();
+  } catch (error) {
+    setSyncState(`Could not load private photos: ${error.message}`);
+  } finally {
+    elements.refreshRemote.disabled = false;
+  }
+}
+async function uploadLocalPhotos() {
+  if (!githubSync) return;
+  setSyncState("Uploading local photos…");
+  for (const capture of captures) queueSync(capture);
+  await syncQueue;
+  setSyncState("Local photos are synchronized");
 }
 
 elements.startSession.addEventListener("click", startSession); elements.stopSession.addEventListener("click", () => stopSession()); elements.captureNow.addEventListener("click", capturePhoto); elements.exportZip.addEventListener("click", exportZip);
-elements.deleteAll.addEventListener("click", async () => { if (!confirm("Delete every local photo and reading from this iPhone? This cannot be undone.")) return; await clearCaptures(); captures = []; renderCaptures(); }); elements.closePhoto.addEventListener("click", () => elements.photoDialog.close());
+elements.connectGithub.addEventListener("click", connectGitHub); elements.syncNow.addEventListener("click", uploadLocalPhotos); elements.refreshRemote.addEventListener("click", refreshRemote);
+elements.deleteAll.addEventListener("click", async () => { if (!confirm("Remove every local photo and reading from this device? Private GitHub copies will remain.")) return; await clearCaptures(); captures = []; renderCaptures(); }); elements.closePhoto.addEventListener("click", () => elements.photoDialog.close());
 document.addEventListener("visibilitychange", () => { if (!document.hidden) void requestWakeLock(); });
 window.addEventListener("beforeunload", () => stopSession());
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js");

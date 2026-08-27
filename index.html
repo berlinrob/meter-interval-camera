@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#10201b" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; worker-src 'self' blob:; connect-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; worker-src 'self' blob:; connect-src 'self' https://api.github.com; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="stylesheet" href="./styles.css" />
     <title>Meter Watch</title>
@@ -62,6 +62,14 @@
         </div>
       </section>
 
+      <section class="sync-card">
+        <div class="section-heading"><div><p class="eyebrow">PRIVATE GITHUB SYNC</p><h2>Meter Reader</h2></div><span id="sync-state" class="quiet">Not connected</span></div>
+        <label>Private repository<input id="github-repository" value="berlinrob/Meter-Reader" autocomplete="off" autocapitalize="none" spellcheck="false" /></label>
+        <label>Fine-grained GitHub token<input id="github-token" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Stored only until this tab closes" /></label>
+        <p class="quiet">The token stays only in this open app tab. Give it access only to this private repository, with Contents read/write permission.</p>
+        <div class="primary-actions"><button id="connect-github" class="button button-secondary">Connect private sync</button><button id="sync-now" class="button button-primary" disabled>Upload local photos</button><button id="refresh-remote" class="button button-secondary" disabled>View private photos</button></div>
+      </section>
+
       <section class="readings-card">
         <div class="section-heading"><div><p class="eyebrow">READINGS</p><h2 id="reading-count">No photos yet</h2></div><button id="export-zip" class="text-button" disabled>Export ZIP</button></div>
         <p class="quiet">Meter reading detection runs on this iPhone. Review and correct every result before relying on it.</p>
@@ -76,7 +84,7 @@
       <article class="reading-item">
         <button class="thumbnail-button" type="button"><img alt="Captured meter" /></button>
         <div class="reading-main"><time></time><label>Meter reading<input class="reading-value" inputmode="decimal" autocomplete="off" placeholder="Review reading" /></label><p class="ocr-status"></p></div>
-        <button class="delete-reading" type="button" aria-label="Delete photo">Delete</button>
+        <button class="delete-reading" type="button" aria-label="Delete photo">Remove local copy</button>
       </article>
     </template>
     <dialog id="photo-dialog"><button id="close-photo" class="dialog-close" aria-label="Close photo">×</button><img id="full-photo" alt="Captured meter" /></dialog>
