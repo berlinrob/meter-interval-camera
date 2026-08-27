@@ -16,6 +16,7 @@ let worker;
 let ocrBusy = false;
 let githubSync;
 let syncQueue = Promise.resolve();
+let remoteRefreshTimer;
 
 const formatTime = (value) => new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(value);
 const download = (blob, name) => { const url = URL.createObjectURL(blob); const link = Object.assign(document.createElement("a"), { href: url, download: name }); link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); };
@@ -171,24 +172,28 @@ async function connectGitHub() {
     elements.privacyState.textContent = "Private sync ready";
     setSyncState("Connected. Token stays only in this tab.");
     for (const capture of captures) queueSync(capture);
+    await syncQueue;
+    await refreshRemote();
+    clearInterval(remoteRefreshTimer);
+    remoteRefreshTimer = setInterval(() => void refreshRemote(true), 60_000);
   } catch (error) {
     setSyncState(`Could not connect: ${error.message}`);
   } finally {
     elements.connectGithub.disabled = false;
   }
 }
-async function refreshRemote() {
+async function refreshRemote(silent = false) {
   if (!githubSync) return;
   elements.refreshRemote.disabled = true;
-  setSyncState("Loading private photos…");
+  if (!silent) setSyncState("Loading private photos…");
   try {
     const loaded = await githubSync.listCaptures();
     const localIds = new Set(captures.map((capture) => capture.syncId));
     remoteCaptures = loaded.filter((capture) => !localIds.has(capture.syncId));
-    setSyncState(`${loaded.length} private photo${loaded.length === 1 ? "" : "s"} loaded`);
+    if (!silent) setSyncState(`${loaded.length} private photo${loaded.length === 1 ? "" : "s"} loaded`);
     renderCaptures();
   } catch (error) {
-    setSyncState(`Could not load private photos: ${error.message}`);
+    if (!silent) setSyncState(`Could not load private photos: ${error.message}`);
   } finally {
     elements.refreshRemote.disabled = false;
   }
